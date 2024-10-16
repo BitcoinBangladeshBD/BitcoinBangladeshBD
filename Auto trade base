@@ -1,0 +1,166 @@
+const Web3 = require('web3');
+const axios = require('axios');
+const fs = require('fs');
+
+const web3 = new Web3('https://eth-mainnet.alchemyapi.io/v2/YOUR_ALCHEMY_API_KEY'); // Use your mainnet RPC URL
+const account = web3.eth.accounts.privateKeyToAccount('0x9c260f5db99fd052d100f06289c9e1c2f462c53af8ad78c80d665449106f59');
+web3.eth.accounts.wallet.add(account);
+
+const TOKEN_ADDRESSES = {
+    USDT: '0xdac17f958d2ee523a2206206994597c13d831ec7', // USDT contract on Ethereum Mainnet
+    BTC: '0x...your_btc_token_address...',
+    ETH: '0x...your_eth_token_address...',
+    SOL: '0x...your_sol_token_address...'
+};
+
+const SLIPPAGE = 0.5; // Adjust as necessary
+const GAS_PRICE = 20000000000; // 20 Gwei
+const TRADE_PERCENTAGE = 0.85; // Use 85% of balance for trades
+const ETH_TRADE_PERCENTAGE = 0.80; // Use 80% of ETH for trades
+
+const MAX_LOSS_PERCENTAGE = 0.15; // Maximum loss before selling (15%)
+const MIN_LOSS_PERCENTAGE = 0.25; // Minimum loss threshold to not sell (25%)
+const checkInterval = 30 * 1000; // Check every 30 seconds
+
+const fetchCurrentPrice = async (token) => {
+    try {
+        const response = await axios.get(`https://api.1inch.io/v4.0/1/quote?fromTokenAddress=${TOKEN_ADDRESSES[token]}&toTokenAddress=${TOKEN_ADDRESSES.USDT}&amount=1000000000000000000`); // Fetching 1 token worth in USDT
+        return response.data.toTokenAmount / 1e6; // Convert to readable format
+    } catch (error) {
+        console.error(`Error fetching current price for ${token}:`, error.message);
+        return null; // Return null if there's an error
+    }
+};
+
+const fetchHistoricalPrices = async (token) => {
+    try {
+        const response = await axios.get(`https://api.1inch.io/v4.0/1/quote?fromTokenAddress=${TOKEN_ADDRESSES[token]}&toTokenAddress=${TOKEN_ADDRESSES.USDT}&amount=1000000000000000000`); 
+        return response.data;
+    } catch (error) {
+        console.error(`Error fetching historical prices for ${token}:`, error.message);
+        return []; // Return an empty array if there's an error
+    }
+};
+
+const calculateMovingAverage = (prices, period) => {
+    const sum = prices.slice(-period).reduce((a, b) => a + b, 0);
+    return sum / period;
+};
+
+const logTransaction = (message) => {
+    const logMessage = `${new Date().toISOString()} - ${message}`;
+    console.log(logMessage); // Log to console for live reporting
+    fs.appendFileSync('trade_log.txt', logMessage + '\n'); // Also save to file
+};
+
+const trade = async () => {
+    try {
+        const usdtBalance = await getTokenBalance(TOKEN_ADDRESSES.USDT);
+        const btcBalance = await getTokenBalance(TOKEN_ADDRESSES.BTC);
+        const ethBalance = await getTokenBalance(TOKEN_ADDRESSES.ETH);
+        const solBalance = await getTokenBalance(TOKEN_ADDRESSES.SOL);
+
+        // Check prices and calculate moving averages
+        const btcPrices = await fetchHistoricalPrices('BTC');
+        const ethPrices = await fetchHistoricalPrices('ETH');
+        const solPrices = await fetchHistoricalPrices('SOL');
+
+        const btcMA = calculateMovingAverage(btcPrices, 10); // 10-period MA
+        const currentBtcPrice = await fetchCurrentPrice('BTC');
+        
+        // Trading Logic for BTC
+        if (currentBtcPrice && currentBtcPrice < btcMA) {
+            const amountToBuy = (usdtBalance * TRADE_PERCENTAGE) / currentBtcPrice;
+            // Execute buy BTC order
+            logTransaction(`Bought ${amountToBuy} BTC for ${currentBtcPrice} USDT`);
+        } else if (currentBtcPrice && currentBtcPrice > btcMA) {
+            const amountToSell = btcBalance * 0.85; // Sell 85% of BTC
+
+            const purchasePrice = await fetchPurchasePrice('BTC'); // Function to retrieve purchase price
+            if (purchasePrice) {
+                const lossPercentage = (purchasePrice - currentBtcPrice) / purchasePrice;
+
+                if (lossPercentage <= MAX_LOSS_PERCENTAGE) {
+                    // Execute sell BTC order
+                    logTransaction(`Sold ${amountToSell} BTC for ${currentBtcPrice} USDT`);
+                } else if (lossPercentage < MIN_LOSS_PERCENTAGE) {
+                    // Do not sell if the loss is more than 25%
+                    logTransaction(`Holding BTC - current price ${currentBtcPrice} has exceeded the loss limit.`);
+                }
+            }
+        }
+
+        // Trading Logic for ETH
+        const ethMA = calculateMovingAverage(ethPrices, 10); // 10-period MA
+        const currentEthPrice = await fetchCurrentPrice('ETH');
+        
+        if (currentEthPrice && currentEthPrice < ethMA) {
+            const amountToBuy = (usdtBalance * ETH_TRADE_PERCENTAGE) / currentEthPrice;
+            // Execute buy ETH order
+            logTransaction(`Bought ${amountToBuy} ETH for ${currentEthPrice} USDT`);
+        } else if (currentEthPrice && currentEthPrice > ethMA) {
+            const amountToSell = ethBalance * 0.85; // Sell 85% of ETH
+
+            const purchasePrice = await fetchPurchasePrice('ETH'); // Function to retrieve purchase price
+            if (purchasePrice) {
+                const lossPercentage = (purchasePrice - currentEthPrice) / purchasePrice;
+
+                if (lossPercentage <= MAX_LOSS_PERCENTAGE) {
+                    // Execute sell ETH order
+                    logTransaction(`Sold ${amountToSell} ETH for ${currentEthPrice} USDT`);
+                } else if (lossPercentage < MIN_LOSS_PERCENTAGE) {
+                    // Do not sell if the loss is more than 25%
+                    logTransaction(`Holding ETH - current price ${currentEthPrice} has exceeded the loss limit.`);
+                }
+            }
+        }
+
+        // Trading Logic for SOL
+        const solMA = calculateMovingAverage(solPrices, 10); // 10-period MA
+        const currentSolPrice = await fetchCurrentPrice('SOL');
+        
+        if (currentSolPrice && currentSolPrice < solMA) {
+            const amountToBuy = (usdtBalance * TRADE_PERCENTAGE) / currentSolPrice;
+            // Execute buy SOL order
+            logTransaction(`Bought ${amountToBuy} SOL for ${currentSolPrice} USDT`);
+        } else if (currentSolPrice && currentSolPrice > solMA) {
+            const amountToSell = solBalance * 0.85; // Sell 85% of SOL
+
+            const purchasePrice = await fetchPurchasePrice('SOL'); // Function to retrieve purchase price
+            if (purchasePrice) {
+                const lossPercentage = (purchasePrice - currentSolPrice) / purchasePrice;
+
+                if (lossPercentage <= MAX_LOSS_PERCENTAGE) {
+                    // Execute sell SOL order
+                    logTransaction(`Sold ${amountToSell} SOL for ${currentSolPrice} USDT`);
+                } else if (lossPercentage < MIN_LOSS_PERCENTAGE) {
+                    // Do not sell if the loss is more than 25%
+                    logTransaction(`Holding SOL - current price ${currentSolPrice} has exceeded the loss limit.`);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error in trading process:', error.message);
+        logTransaction(`Error in trading process: ${error.message}`);
+    }
+};
+
+const getTokenBalance = async (tokenAddress) => {
+    try {
+        const contract = new web3.eth.Contract(ERC20_ABI, tokenAddress);
+        const balance = await contract.methods.balanceOf(account.address).call();
+        return web3.utils.fromWei(balance, 'ether'); // Adjust according to your token's decimal places
+    } catch (error) {
+        console.error(`Error fetching balance for ${tokenAddress}:`, error.message);
+        return 0; // Return 0 if there's an error
+    }
+};
+
+const fetchPurchasePrice = async (token) => {
+    // Logic to retrieve the purchase price for the token
+    // This could be a variable that tracks the last purchase price for simplicity
+    return previousPurchasePrice; // Placeholder, replace with actual logic
+};
+
+// Main loop
+setInterval(trade, checkInterval); // Execute trade function every 30 seconds
