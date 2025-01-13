@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polygon Faucet</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f7f7f7; color: #333; padding: 20px; text-align: center; }
+        h1 { color: #3b82f6; }
+        .container { max-width: 800px; margin: 0 auto; padding: 20px; background-color: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        input, button { padding: 10px; width: 100%; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; font-size: 16px; }
+        button { background-color: #3b82f6; color: #fff; cursor: pointer; }
+        button:hover { background-color: #2563eb; }
+        .g-recaptcha { margin: 20px 0; }
+        #task-section { display: none; }
+        .message { font-size: 18px; }
+        .task { margin-top: 20px; }
+    </style>
+    <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+</head>
+<body>
+
+    <div class="container">
+        <h1>💰 Polygon Faucet</h1>
+        <p>Earn <strong>0.01 MATIC</strong> by completing simple tasks! 🤑</p>
+
+        <label for="wallet-address">Enter your Polygon Wallet Address:</label>
+        <input type="text" id="wallet-address" placeholder="0x..." />
+
+        <div class="g-recaptcha" data-sitekey="your-site-key-here"></div>
+
+        <button onclick="verifyCaptcha()">Start Earning!</button>
+
+        <div id="task-section">
+            <h2>🎯 Tasks to Earn MATIC</h2>
+            <div class="task">
+                <button onclick="claimReward()">✅ Complete Task 1</button>
+                <p>Earn 0.01 MATIC by completing Task 1.</p>
+            </div>
+        </div>
+
+        <div id="message" class="message"></div>
+    </div>
+
+    <script>
+        let isCaptchaVerified = false;
+
+        // Function to verify the CAPTCHA
+        function verifyCaptcha() {
+            const walletAddress = document.getElementById("wallet-address").value.trim();
+            const messageElement = document.getElementById("message");
+            const recaptchaResponse = grecaptcha.getResponse();
+
+            if (!/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
+                messageElement.textContent = "❌ Please enter a valid Polygon wallet address.";
+                messageElement.style.color = "red";
+                return;
+            }
+
+            if (!recaptchaResponse) {
+                messageElement.textContent = "❌ Please complete the reCAPTCHA.";
+                messageElement.style.color = "red";
+                return;
+            }
+
+            // Send reCAPTCHA response to the backend for verification
+            fetch("https://your-backend-api/verify-captcha", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ recaptchaResponse })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    isCaptchaVerified = true;
+                    messageElement.textContent = "✅ CAPTCHA Verified! You can now complete tasks.";
+                    messageElement.style.color = "green";
+                    document.getElementById("task-section").style.display = "block";
+                } else {
+                    messageElement.textContent = "❌ CAPTCHA verification failed.";
+                    messageElement.style.color = "red";
+                }
+            });
+        }
+
+        // Function to claim MATIC after completing a task
+        function claimReward() {
+            if (!isCaptchaVerified) {
+                alert("Please verify the CAPTCHA first!");
+                return;
+            }
+
+            const walletAddress = document.getElementById("wallet-address").value.trim();
+            fetch("https://your-backend-api/claim-reward", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ walletAddress })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById("message").textContent = "🎉 Success! 0.01 MATIC sent to your wallet!";
+                    document.getElementById("message").style.color = "green";
+                } else {
+                    document.getElementById("message").textContent = "❌ Something went wrong, try again later!";
+                    document.getElementById("message").style.color = "red";
+                }
+            });
+        }
+    </script>
+</body>
+</html>
